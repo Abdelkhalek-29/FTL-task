@@ -25,6 +25,7 @@ export const charging = asyncHandler(async (req, res, next) => {
     case "Card":
       paymentResponse = await initiateCardPaymentService({
         amount: validAmount,
+        name: "wallet charging",
       });
       break;
     case "Apple":
@@ -75,7 +76,9 @@ export const charging = asyncHandler(async (req, res, next) => {
     amount: validAmount,
     type: "Wallet",
     method,
+    orderId: paymentResponse.result.orderId,
     reason: "Wallet recharge",
+    status: "pending",
   });
 
   res.status(200).json({
@@ -128,4 +131,56 @@ export const userWallet = asyncHandler(async (req, res, next) => {
     success: true,
     data: { userBalance, transactions },
   });
+});
+
+export const noonWebhook = asyncHandler(async (req, res) => {
+  const noonSignature = req.headers["noon-signature"];
+  const {
+    event,
+    data: {
+      order: { orderId, amount, status, userId, paymentMethod },
+    },
+  } = req.body;
+
+  switch (event) {
+    case "payment.success":
+      const user = await userModel.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+      await transactionModel.findOneAndUpdate(
+        { orderId },
+        { status: "completed" }
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Webhook processed successfully",
+      });
+      break;
+
+    case "payment.failed":
+      await transactionModel.findOneAndUpdate(
+        { orderId },
+        {
+          status: "failed",
+          failureReason: status.message || "Payment failed",
+        }
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Failed payment webhook processed",
+      });
+      break;
+
+    default:
+      res.status(400).json({
+        success: false,
+        message: "Unknown webhook event",
+      });
+  }
 });
